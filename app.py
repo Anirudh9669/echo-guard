@@ -15,8 +15,7 @@ from datetime import datetime
 # ==========================================
 st.set_page_config(
     page_title="EchoGuard",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 # Custom CSS for Professional Industrial Look
@@ -70,11 +69,6 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
         font-weight: 500;
         color: #e2e8f0;
-    }
-    
-    /* Sidebar Cleanup */
-    section[data-testid="stSidebar"] {
-        background-color: rgba(15, 23, 42, 0.5);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -173,25 +167,25 @@ def process_audio(file_path):
         return None, None, None, None, f"DSP Error: {e}"
 
 # ==========================================
-# 4. DASHBOARD UI
+# 4. MAIN APP INTERFACE
 # ==========================================
-
-# -- Sidebar Controls --
-with st.sidebar:
-    st.subheader("Configuration")
-    
-    uploaded_file = st.file_uploader("Audio Input", type=["wav"])
-    
-    st.markdown("---")
-    st.markdown("**Calibration**")
-    THRESHOLD = st.slider("Anomaly Threshold", 0.30, 0.60, 0.4718, 0.001)
-    
-    st.markdown("---")
-    st.caption(f"Model: Hybrid Autoencoder v10")
 
 # -- Main Header --
 st.title("EchoGuard")
 st.markdown("##### Acoustic Anomaly Detection System")
+
+# -- Configuration Section (Top of Page) --
+st.markdown("### Configuration")
+col_conf1, col_conf2 = st.columns([2, 1])
+
+with col_conf1:
+    uploaded_file = st.file_uploader("Upload Audio Input (.wav)", type=["wav"])
+
+with col_conf2:
+    st.markdown("**Calibration**")
+    THRESHOLD = st.slider("Anomaly Threshold", 0.30, 0.60, 0.4718, 0.001)
+    st.caption(f"Model: Hybrid Autoencoder v10")
+
 st.markdown("---")
 
 # Load Brain
@@ -229,10 +223,10 @@ else:
             latent_vec_flat = latent_vec.cpu().numpy().flatten()
             
             # Hybrid Feature Extraction
+            # MSE Error calculated for display only
             mse_error = torch.mean((input_tensor - reconstruction) ** 2).item()
-            combined_features = np.append(latent_vec_flat, mse_error)
             
-        # Scoring
+        # Scoring - FIX: Use only the 256 latent features to match training
         score = -iso_forest.score_samples(latent_vec_flat.reshape(1, -1))[0]
         is_anomaly = score > THRESHOLD
 
