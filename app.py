@@ -7,15 +7,77 @@ import librosa.display
 import matplotlib.pyplot as plt
 import joblib
 import os
+import pandas as pd
+from datetime import datetime
 
 # ==========================================
-# 1. PAGE CONFIGURATION
+# 1. PAGE CONFIGURATION & STYLING
 # ==========================================
 st.set_page_config(
-    page_title="Echo-Guard Diagnostics",
-    page_icon="🔊",
-    layout="centered"
+    page_title="EchoGuard",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
+
+# Custom CSS for Professional Industrial Look
+st.markdown("""
+    <style>
+    /* Background Image - Acoustic/Tech Theme */
+    .stApp {
+        background-image: linear-gradient(rgba(10, 15, 30, 0.9), rgba(10, 15, 30, 0.9)), 
+                          url('https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=2070&auto=format&fit=crop');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+    }
+    
+    /* Clean Metric Cards */
+    div[data-testid="stMetric"] {
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 15px;
+        border-radius: 6px;
+        color: white;
+    }
+    
+    /* Professional Result Banners (No Emojis) */
+    .status-banner {
+        padding: 20px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        color: white;
+        font-family: 'Segoe UI', sans-serif;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .status-safe {
+        background-color: rgba(16, 185, 129, 0.2);
+        border-left: 4px solid #10b981;
+    }
+    .status-danger {
+        background-color: rgba(239, 68, 68, 0.2);
+        border-left: 4px solid #ef4444;
+    }
+    
+    /* Typography */
+    h1 {
+        font-family: 'Inter', sans-serif;
+        font-weight: 700;
+        letter-spacing: -1px;
+    }
+    h3 {
+        font-family: 'Inter', sans-serif;
+        font-weight: 500;
+        color: #e2e8f0;
+    }
+    
+    /* Sidebar Cleanup */
+    section[data-testid="stSidebar"] {
+        background-color: rgba(15, 23, 42, 0.5);
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # Constants
 SAMPLE_RATE = 16000
@@ -61,37 +123,40 @@ class ConvolutionalAutoencoder(nn.Module):
         return latent_vector, reconstruction
 
 # ==========================================
-# 3. HELPER FUNCTIONS
+# 3. UTILITY FUNCTIONS
 # ==========================================
 @st.cache_resource
 def load_models():
     device = torch.device("cpu")
     model = ConvolutionalAutoencoder()
     
-    # 1. Load Neural Network (Prioritize v10)
-    model_name = 'echo_guard_v10_generalist.pth'
-    if not os.path.exists(model_name):
-        model_name = 'echo_guard_v9.pth' # Fallback
+    # Priority Loading
+    paths = ['echo_guard_v10_generalist.pth', 'echo_guard_v9.pth']
+    loaded_path = None
+    for p in paths:
+        if os.path.exists(p):
+            try:
+                model.load_state_dict(torch.load(p, map_location=device))
+                model.eval()
+                loaded_path = p
+                break
+            except: continue
+            
+    if not loaded_path:
+        return None, None, "Error: Neural Network model file not found."
 
-    try:
-        model.load_state_dict(torch.load(model_name, map_location=device))
-        model.eval()
-    except FileNotFoundError:
-        return None, None, f"❌ Missing Model: Could not find '{model_name}'"
-    except Exception as e:
-        return None, None, f"❌ Neural Net Error: {e}"
-
-    # 2. Load Isolation Forest (Prioritize v10)
-    iso_name = 'iso_forest_v10_generalist.joblib'
-    if not os.path.exists(iso_name):
-        iso_name = 'iso_forest_v9.joblib' # Fallback
-
-    try:
-        iso_forest = joblib.load(iso_name)
-    except FileNotFoundError:
-        return None, None, f"❌ Missing Judge: Could not find '{iso_name}'"
-    except Exception as e:
-        return None, None, f"❌ IsoForest Error: {e}"
+    # Load IsoForest
+    iso_paths = ['iso_forest_v10_generalist.joblib', 'iso_forest_v9.joblib']
+    iso_forest = None
+    for p in iso_paths:
+        if os.path.exists(p):
+            try:
+                iso_forest = joblib.load(p)
+                break
+            except: continue
+            
+    if iso_forest is None:
+        return None, None, "Error: Isolation Forest model file not found."
         
     return model, iso_forest, None
 
@@ -105,54 +170,57 @@ def process_audio(file_path):
         tensor = torch.tensor(log_mels, dtype=torch.float32).unsqueeze(0)
         return y, sr, log_mels, tensor, None
     except Exception as e:
-        return None, None, None, None, f"Error processing audio: {e}"
+        return None, None, None, None, f"DSP Error: {e}"
 
 # ==========================================
-# 4. MAIN APP INTERFACE
+# 4. DASHBOARD UI
 # ==========================================
 
-# -- Sidebar --
+# -- Sidebar Controls --
 with st.sidebar:
-    st.header("⚙️ Configuration")
-    uploaded_file = st.file_uploader("Upload Audio (.wav)", type=["wav"])
+    st.subheader("Configuration")
+    
+    uploaded_file = st.file_uploader("Audio Input", type=["wav"])
     
     st.markdown("---")
-    st.subheader("Calibration")
-    # Optimal Threshold from v10 Evaluation
-    THRESHOLD = st.slider("Anomaly Threshold", 0.30, 0.60, 0.4718, 0.01, 
-                          help="Fine-tune sensitivity. If getting false alarms, increase this.")
+    st.markdown("**Calibration**")
+    THRESHOLD = st.slider("Anomaly Threshold", 0.30, 0.60, 0.4718, 0.001)
+    
+    st.markdown("---")
+    st.caption(f"Model: Hybrid Autoencoder v10")
 
-# -- Main Content --
-st.title("🔊 Echo-Guard")
-st.subheader("Industrial Acoustic Anomaly Detection")
-st.write("Upload a machine sound file to analyze its health status.")
+# -- Main Header --
+st.title("EchoGuard")
+st.markdown("##### Acoustic Anomaly Detection System")
+st.markdown("---")
 
-# Load Models
+# Load Brain
 model, iso_forest, err_msg = load_models()
 
 if err_msg:
     st.error(err_msg)
-    st.info("💡 Tip: Make sure you downloaded the .pth and .joblib files from Google Drive to this folder!")
     st.stop()
 
 if uploaded_file is None:
-    st.info("👈 Please upload a .wav file from the sidebar.")
+    # Idle State
+    st.markdown("""
+    <div style="text-align: center; padding: 40px; color: #888;">
+        Await Sensor Data Input
+    </div>
+    """, unsafe_allow_html=True)
+
 else:
-    st.divider()
-    
-    # --- ANALYSIS ---
-    with st.spinner("Analyzing signal patterns..."):
-        # Save temp file
+    # --- ANALYSIS ENGINE ---
+    with st.spinner("Processing signal..."):
         with open("temp.wav", "wb") as f:
             f.write(uploaded_file.getbuffer())
             
         y, sr, spec_img, tensor, proc_err = process_audio("temp.wav")
         
         if proc_err:
-            st.error(proc_err)
+            st.error(f"Processing Failed: {proc_err}")
             st.stop()
 
-        # AI Inference
         device = torch.device("cpu")
         input_tensor = tensor.unsqueeze(0).to(device)
         
@@ -160,58 +228,102 @@ else:
             latent_vec, reconstruction = model(input_tensor)
             latent_vec_flat = latent_vec.cpu().numpy().flatten()
             
-            # We calculate MSE just for display, but DO NOT add it to features for scoring
-            # because the saved Isolation Forest expects only 256 features.
+            # Hybrid Feature Extraction
             mse_error = torch.mean((input_tensor - reconstruction) ** 2).item()
+            combined_features = np.append(latent_vec_flat, mse_error)
             
-        # Scoring (Using only the 256 latent features)
+        # Scoring
         score = -iso_forest.score_samples(latent_vec_flat.reshape(1, -1))[0]
         is_anomaly = score > THRESHOLD
 
-    # --- RESULTS DISPLAY ---
-    col1, col2 = st.columns([2, 1])
+    # --- INSIGHTS ENGINE ---
+    diff = score - THRESHOLD
     
-    with col1:
-        if is_anomaly:
-            st.error(f"### 🚨 ANOMALY DETECTED")
-            st.write(f"**Assessment:** The machine sound deviates significantly from normal patterns.")
-        else:
-            st.success(f"### ✅ SYSTEM NORMAL")
-            st.write(f"**Assessment:** The machine sound matches the healthy baseline.")
-            
-    with col2:
-        st.metric("Anomaly Score", f"{score:.4f}", delta=f"Limit: {THRESHOLD}", delta_color="inverse")
+    # --- DASHBOARD LAYOUT ---
+    
+    # 1. Status Banner
+    if is_anomaly:
+        st.markdown(f"""
+        <div class="status-banner status-danger">
+            <div>
+                <h3 style="margin:0; color:#fca5a5;">ANOMALY DETECTED</h3>
+                <p style="margin:0; font-size: 0.9rem; opacity:0.8;">Spectral signature deviation exceeds limit.</p>
+            </div>
+            <div style="font-weight:bold; font-size:1.5rem;">{score:.4f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class="status-banner status-safe">
+            <div>
+                <h3 style="margin:0; color:#6ee7b7;">SYSTEM NORMAL</h3>
+                <p style="margin:0; font-size: 0.9rem; opacity:0.8;">Acoustic signature within healthy parameters.</p>
+            </div>
+            <div style="font-weight:bold; font-size:1.5rem;">{score:.4f}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # --- VISUALIZATION (Expandable) ---
-    st.divider()
-    with st.expander("🔎 View Technical Analysis (Spectrograms)"):
-        st.write("Compare the **Input** (what we heard) with the **Reconstruction** (what a normal machine *should* sound like). Differences appear in the **Residual Map**.")
+    # 2. Key Metrics Grid
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Deviation Score", f"{diff:+.4f}", help="Difference between Score and Threshold")
+    m2.metric("Active Threshold", f"{THRESHOLD:.4f}")
+    m3.metric("Reconstruction Error", f"{mse_error:.5f}")
+
+    st.markdown("---")
+
+    # 3. Technical Visuals (Clean Tabs)
+    tab1, tab2 = st.tabs(["Signal", "Neural Analysis"])
+
+    with tab1:
         st.audio("temp.wav", format="audio/wav")
         
-        # Prepare Visuals
+        fig, ax = plt.subplots(figsize=(12, 3))
+        color = '#ef4444' if is_anomaly else '#10b981'
+        ax.plot(np.linspace(0, len(y)/sr, len(y)), y, color=color, alpha=0.9, linewidth=0.6)
+        
+        # Minimalist Dark Theme
+        ax.set_facecolor('#00000000') # Transparent
+        fig.patch.set_facecolor('#00000000')
+        ax.axis('off')
+        
+        # Use container width for mobile responsiveness
+        st.pyplot(fig, use_container_width=True)
+        st.caption("Amplitude/Time Waveform")
+
+    with tab2:
         in_img = tensor.squeeze().numpy()
         out_img = reconstruction.squeeze().numpy()
         err_img = np.abs(in_img - out_img)
         
-        fig, axes = plt.subplots(3, 1, figsize=(8, 10))
+        # Helper for dark mode plots - Increased size and aspect ratio management
+        def plot_full(data, title, cmap, vmax=1.0):
+            fig, ax = plt.subplots(figsize=(10, 4))
+            im = ax.imshow(data, aspect='auto', origin='lower', cmap=cmap, vmin=0, vmax=vmax)
+            ax.set_title(title, color='#94a3b8', fontsize=12, pad=10, loc='left')
+            ax.set_xlabel("Time", color='#505050')
+            ax.set_ylabel("Frequency", color='#505050')
+            ax.tick_params(axis='both', colors='#505050')
+            
+            # Remove frame
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['bottom'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            
+            fig.patch.set_facecolor('#00000000')
+            ax.set_facecolor('#00000000')
+            
+            cbar = plt.colorbar(im, ax=ax, pad=0.02)
+            cbar.ax.yaxis.set_tick_params(color='#505050', labelcolor='#505050')
+            cbar.outline.set_visible(False)
+            
+            return fig
+
+        st.markdown("#### A. Sensor Input")
+        st.pyplot(plot_full(in_img, "Raw Spectrogram", 'viridis'), use_container_width=True)
         
-        # 1. Input
-        im1 = axes[0].imshow(in_img, aspect='auto', origin='lower', cmap='viridis', vmin=0, vmax=1)
-        axes[0].set_title("Input Spectrogram (Actual Sound)")
-        axes[0].axis('off')
-        plt.colorbar(im1, ax=axes[0])
-        
-        # 2. Output
-        im2 = axes[1].imshow(out_img, aspect='auto', origin='lower', cmap='viridis', vmin=0, vmax=1)
-        axes[1].set_title("AI Reconstruction (Normal Baseline)")
-        axes[1].axis('off')
-        plt.colorbar(im2, ax=axes[1])
-        
-        # 3. Residual
-        im3 = axes[2].imshow(err_img, aspect='auto', origin='lower', cmap='magma')
-        axes[2].set_title("Residual Map (Difference)")
-        axes[2].axis('off')
-        plt.colorbar(im3, ax=axes[2])
-        
-        plt.tight_layout()
-        st.pyplot(fig)
+        st.markdown("#### B. Model Reconstruction")
+        st.pyplot(plot_full(out_img, "AI Baseline (Expected Normal)", 'viridis'), use_container_width=True)
+            
+        st.markdown("#### C. Residual Error Map")
+        st.pyplot(plot_full(err_img, "Difference (Anomalies highlighted)", 'magma', vmax=0.3), use_container_width=True)
