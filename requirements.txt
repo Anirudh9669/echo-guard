@@ -1,9 +1,9 @@
 streamlit
-torch
 numpy
-librosa==0.10.2.post1
-numba==0.59.1
-llvmlite==0.42.0
 matplotlib
 joblib
 scikit-learn
+torch
+librosa==0.10.2.post1
+numba==0.59.1
+llvmlite==0.42.0
